@@ -1,8 +1,14 @@
 # acrcloud
 ACR Cloud Python Client
 
+API ACRCloud Doc
+---
+
+https://docs.acrcloud.com/reference/console-api
+
 
 ACRClient Examples Usage
+---
 
 List and remove audios that are created on 2021
 
@@ -27,3 +33,9 @@ for bucket in acr.list_buckets(search="my-bucket-"):
             log(bucket, "Not found any audio from 2021")
             break
 ```
+
+### Roadmap plan
+
+- [ ] Handle date fields with datetime object
+- [ ] Handle TOKEN through environment variables 
+- [ ] Publish to pip
