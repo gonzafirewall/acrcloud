@@ -3,10 +3,12 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import os
 
 ACR_API = "https://api-v2.acrcloud.com"
 
-DEFAULT_LABELS = ["tmp", "audio", "recognizer"]
+TOKEN = os.getenv("ACR_CLOUD_TOKEN", "")
+# DEFAULT_LABELS = ["tmp", "audio", "recognizer"]
 
 class APIException(Exception):
     """ACRCloud API Exception"""
@@ -18,6 +20,7 @@ class APIException(Exception):
 
 @dataclass
 class ACRAudio:
+    """ACRCloud Audio object"""
     title: str
     user_defined: dict
     session: "ACRCloudClient"
@@ -44,6 +47,7 @@ class ACRAudio:
 
 @dataclass
 class ACRBucket:
+    """ACRCloud Bucket object"""
     id: int
     session: "ACRCloudClient"
     uid: Optional[int] = None
@@ -62,6 +66,7 @@ class ACRBucket:
     access_permission: Optional[str] = None
 
     def upload_audio(self, file_path, user_defined={}) -> ACRAudio:
+        """Upload an audio file to the bucket"""
         sub_path = f"/api/buckets/{self.id}/files"
 
         print(f"Trying to upload {file_path}")
@@ -77,9 +82,7 @@ class ACRBucket:
         with open(file_path, "rb") as f:
             res = self.session.post(ACR_API + sub_path, data=payload, files={"file": f})
         if not res.ok:
-            print(f"Error uploading audio {title}")
-            print(res.json())
-            return None
+            raise APIException(res, f"Error uploading audio {title}")
         return ACRAudio(session=self.session, **res.json()["data"])
 
     def list_audios(self, page=1, order="desc") -> "PaginatedResponse":
@@ -95,6 +98,7 @@ class ACRBucket:
 
 
 class PaginatedResponse:
+    """Handle paginated responses from ACRCloud API"""
     def __init__(self, session, response, serializer, params=""):
         self.session = session
         self.items = response["data"]
@@ -106,18 +110,23 @@ class PaginatedResponse:
             self.meta = response["meta"]
 
     def has(self, direction):
+        """Check if the response has a next or previous page"""
         return direction in self.links and bool(self.links[direction])
 
     def prepare_response(self, res):
+        """Wrap the response in a PaginatedResponse object"""
         return PaginatedResponse(self.session, res.json(), self.serializer, self.params)
 
     def next(self):
+        """Follow the next page link"""
         return self.handle_direction("next")
 
     def prev(self):
+        """Follow the previous page link"""
         return self.handle_direction("prev")
 
     def handle_direction(self, direction):
+        """Generic method to follow a link in a direction"""
         if direction not in ["next", "prev"]:
             raise ValueError("Direction must be either 'next' or 'prev'")
         if not self.has(direction):
@@ -128,6 +137,7 @@ class PaginatedResponse:
     # Inspired by stripe-python
     # https://github.com/stripe/stripe-python/blob/fa26fa57ff980eee12ab6b770df601e6dd7bef34/stripe/api_resources/list_object.py#L80
     def __iter__(self):
+        """Iterate over all items in the paginated response and yield the serializer"""
         page = self
 
         while True:
@@ -141,6 +151,7 @@ class PaginatedResponse:
 
     @property
     def is_empty(self):
+        """Check if the response is empty"""
         return not self.items
 
     def __repr__(self):
@@ -151,42 +162,51 @@ class PaginatedResponse:
 
 
 class ACRCloudClient(Session):
-    def __init__(self, token, *args, **kwargs):
+    """Main ACRCloud API client"""
+    def __init__(self, *args, token=TOKEN, **kwargs):
+        """Constructor for ACRCloudClient"""
         super().__init__(*args, **kwargs)
+        if not token:
+            raise ValueError("Token is required")
         self.token = token
         self.headers.update({"Authorization": f"Bearer {self.token}"})
 
     def create_bucket(
         self,
         bucket_name,
-        file_path,
+        labels=None,
         region="ap-southeast-1",
-        labels=DEFAULT_LABELS,
     ):
+        """Create a new bucket"""
+        if not labels:
+            labels = []
         data = {
-            "name": "avbucket",
+            "name": bucket_name,
             "type": "File",
-            "labels": ["Music", "Video"],
+            "labels": labels,
             "net_type": 1,
-            "region": "ap-southeast-1",
+            "region": region,
         }
         res = self.post(ACR_API + "/api/buckets", json=data)
         print(res.text)
         return res
 
     def list_buckets(self, region="us-west-2", search="") -> list[ACRBucket]:
+        """List all buckets in the account"""
         sub_path = f"/api/buckets?region={region}&search={search}"
         res = self.get(ACR_API + sub_path)
         return PaginatedResponse(self, res.json(), ACRBucket)
 
     def get_bucket_by_name(self, name):
+        """Low performance method to get a bucket by name"""
         buckets = self.list_buckets()
         for bucket in buckets:
             if bucket.name == name:
                 return bucket
 
     def get_bucket(self, bucket_id) -> ACRBucket:
-        sub_path = f"/api/buckets/{bucket_id}"
+        """Get Bucket by ID"""
+        # sub_path = f"/api/buckets/{bucket_id}"
         return ACRBucket(session=self, id=bucket_id)
 
     # Audio Actiones
@@ -194,6 +214,7 @@ class ACRCloudClient(Session):
     def list_audios(
         self, bucket_id, page=1, sort="created_at", order="desc"
     ) -> PaginatedResponse:
+        """List audio files in a bucket"""
         params = f"&sort={sort}&order={order}"
         sub_path = f"/api/buckets/{bucket_id}/files?page={page}{params}"
         res = self.get(ACR_API + sub_path)
@@ -207,6 +228,7 @@ class ACRCloudClient(Session):
     def create_audio(
         self: Session, title: str, audio_id: str, data_type: str, user_defined: dict
     ):
+        """Create a new audio file in a bucket"""
         return ACRAudio(
             session=self,
             title=title,
@@ -216,22 +238,21 @@ class ACRCloudClient(Session):
         )
 
     def delete_audio(self, bucket_id, audio_id):
+        """Delete an audio file from a bucket"""
         sub_path = f"/api/buckets/{bucket_id}/files/{audio_id}"
         return self.delete(ACR_API + sub_path).text
 
-    def upload_audio(self, bucket_id, file_path):
+    def upload_audio(self, bucket_id, file_path, title, audio_id, user_defined=None, data_type="audio"):
+        """Upload an audio file to a bucket"""
         sub_path = f"/api/buckets/{bucket_id}/files"
-
-        path = Path(file_path)
-        name = path.name
-        title = name.replace(path.suffix, "")
+        if not user_defined:
+            user_defined = {}
         payload = {
             "title": title,
-            "audio_id": title,
-            "data_type": "audio",
-            "user_defined": json.dumps({"key1": "value1", "key2": "value2"}),
+            "audio_id": audio_id,
+            "data_type": data_type,
+            "user_defined": json.dumps(user_defined),
         }
-        files = [("file", (name, open(file_path)), "audio/mpeg")]
-        with open(file_path, "rb") as f:
-            res = self.post(ACR_API + sub_path, data=payload, files={"file": f})
+        with open(file_path, "rb", encoding="utf8") as file:
+            res = self.post(ACR_API + sub_path, data=payload, files={"file": file})
         return ACRAudio(session=self, **res.json()["data"])

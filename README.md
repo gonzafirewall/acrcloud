@@ -34,8 +34,12 @@ for bucket in acr.list_buckets(search="my-bucket-"):
             break
 ```
 
+Environment Variables
+
+ACR_CLOUD_TOKEN = <TOKEN>
+
 ### Roadmap plan
 
 - [ ] Handle date fields with datetime object
-- [ ] Handle TOKEN through environment variables 
+- [X] Handle TOKEN through default environment variables  
 - [ ] Publish to pip
