@@ -42,4 +42,4 @@ ACR_CLOUD_TOKEN = <TOKEN>
 
 - [ ] Handle date fields with datetime object
 - [X] Handle TOKEN through default environment variables  
-- [ ] Publish to pip
+- [X] Publish to pip
